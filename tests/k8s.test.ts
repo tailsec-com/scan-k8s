@@ -113,6 +113,122 @@ spec:
     const findings = scanK8sManifest(yaml);
     expect(findings.some(f => f.ruleId === 'k8s-image-latest')).toBe(true);
   });
+
+  it('scan capabilities.drop missing ALL → finds k8s-capabilities-drop-missing', () => {
+    const yaml = `
+apiVersion: v1
+kind: Pod
+metadata:
+  name: no-cap-drop
+spec:
+  containers:
+    - name: app
+      image: app:latest
+      securityContext:
+        capabilities:
+          add: ["NET_ADMIN"]
+`;
+    const findings = scanK8sManifest(yaml);
+    expect(findings.some(f => f.ruleId === 'k8s-capabilities-drop-missing')).toBe(true);
+  });
+
+  it('scan automountServiceAccountToken: true → finds k8s-automount-sa-token', () => {
+    const yaml = `
+apiVersion: v1
+kind: Pod
+metadata:
+  name: automount-sa
+spec:
+  automountServiceAccountToken: true
+  containers:
+    - name: app
+      image: app:latest
+`;
+    const findings = scanK8sManifest(yaml);
+    expect(findings.some(f => f.ruleId === 'k8s-automount-sa-token')).toBe(true);
+  });
+
+  it('scan dnsPolicy ClusterFirstWithHostNet → finds k8s-dns-host-network', () => {
+    const yaml = `
+apiVersion: v1
+kind: Pod
+metadata:
+  name: dns-hostnet
+spec:
+  hostNetwork: true
+  dnsPolicy: ClusterFirstWithHostNet
+  containers:
+    - name: app
+      image: app:latest
+`;
+    const findings = scanK8sManifest(yaml);
+    expect(findings.some(f => f.ruleId === 'k8s-dns-host-network')).toBe(true);
+  });
+
+  it('scan serviceAccountName: default → finds k8s-default-sa', () => {
+    const yaml = `
+apiVersion: v1
+kind: Pod
+metadata:
+  name: default-sa-pod
+spec:
+  serviceAccountName: default
+  containers:
+    - name: app
+      image: app:latest
+`;
+    const findings = scanK8sManifest(yaml);
+    expect(findings.some(f => f.ruleId === 'k8s-default-sa')).toBe(true);
+  });
+
+  it('scan high priority class name → finds k8s-high-priority-class', () => {
+    const yaml = `
+apiVersion: v1
+kind: Pod
+metadata:
+  name: high-priority-pod
+spec:
+  priorityClassName: production-high
+  containers:
+    - name: app
+      image: app:latest
+`;
+    const findings = scanK8sManifest(yaml);
+    expect(findings.some(f => f.ruleId === 'k8s-high-priority-class')).toBe(true);
+  });
+
+  it('scan terminationGracePeriodSeconds > 300 → finds k8s-long-grace-period', () => {
+    const yaml = `
+apiVersion: v1
+kind: Pod
+metadata:
+  name: long-grace-pod
+spec:
+  terminationGracePeriodSeconds: 600
+  containers:
+    - name: app
+      image: app:latest
+`;
+    const findings = scanK8sManifest(yaml);
+    expect(findings.some(f => f.ruleId === 'k8s-long-grace-period')).toBe(true);
+  });
+
+  it('scan defaultAllowPrivilegeEscalation: true → finds k8s-default-allow-priv-esc', () => {
+    const yaml = `
+apiVersion: v1
+kind: Pod
+metadata:
+  name: default-priv-esc
+spec:
+  securityContext:
+    defaultAllowPrivilegeEscalation: true
+  containers:
+    - name: app
+      image: app:latest
+`;
+    const findings = scanK8sManifest(yaml);
+    expect(findings.some(f => f.ruleId === 'k8s-default-allow-priv-esc')).toBe(true);
+  });
 });
 
 describe('formatK8sOutput', () => {

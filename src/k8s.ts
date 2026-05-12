@@ -1,43 +1,82 @@
-import { readFileSync } from 'fs';
+import { readFileSync, statSync } from 'fs';
+
+const YAML_CACHE = new Map<string, unknown[]>();
+const RELEVANT_KINDS = new Set(['Pod', 'Deployment', 'StatefulSet', 'DaemonSet', 'Job', 'CronJob', 'Role', 'ClusterRole', 'NetworkPolicy', 'Service']);
 
 function parseYaml(content: string): unknown[] {
+  const cached = YAML_CACHE.get(content);
+  if (cached) return cached;
+
   const docs: unknown[] = [];
   const rawDocs = content.split(/^---$/m);
 
   for (const raw of rawDocs) {
-    const stripped = raw
-      .split('\n')
-      .filter(l => !l.trim().startsWith('#'))
-      .join('\n')
-      .trim();
+    const lines = raw.split('\n');
+    const strippedLines: string[] = [];
+    for (let i = 0; i < lines.length; i++) {
+      const l = lines[i];
+      if (!l.trim().startsWith('#')) strippedLines.push(l);
+    }
+    const stripped = strippedLines.join('\n').trim();
 
     if (!stripped) continue;
 
     try {
       const obj = eval(`(${stripped.replace(/'/g, '"')})`);
+      if (obj && typeof obj === 'object' && obj.kind) {
+        if (!RELEVANT_KINDS.has(obj.kind as string)) continue;
+      }
       docs.push(obj);
     } catch {
-      docs.push(parseYamlLines(stripped.split('\n')));
+      const parsed = parseYamlLines(lines);
+      if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) {
+        docs.push(parsed);
+      }
     }
   }
 
+  YAML_CACHE.set(content, docs);
   return docs;
 }
 
 function parseYamlLines(lines: string[]): Record<string, unknown> {
   const root: Record<string, unknown> = {};
   const stack: Array<{ indent: number; obj: Record<string, unknown> }> = [{ indent: -1, obj: root }];
+  const lineCount = lines.length;
 
-  for (const rawLine of lines) {
-    const line = rawLine;
-    if (!line.trim()) continue;
+  for (let lineIdx = 0; lineIdx < lineCount; lineIdx++) {
+    const rawLine = lines[lineIdx];
+    const trimmed = rawLine.trim();
+    if (!trimmed) continue;
 
-    const match = line.match(/^(\s*)(-?\s*)([^:]+):\s*(.*)$/);
-    if (!match) continue;
+    const colonIdx = trimmed.indexOf(':');
+    if (colonIdx === -1) continue;
 
-    const [, indentStr, dash, key, value] = match;
-    const indent = indentStr.length;
-    const isListItem = dash.trim() === '-';
+    let indent = 0;
+    let keyStart = 0;
+    for (let i = 0; i < rawLine.length; i++) {
+      if (rawLine[i] === ' ') indent = i;
+      else if (rawLine[i] !== ' ') break;
+    }
+
+    const isListItem = trimmed[0] === '-';
+    let key: string;
+    let value: string;
+
+    if (isListItem) {
+      const afterDash = trimmed.slice(1).trim();
+      const vc = afterDash.indexOf(':');
+      if (vc !== -1) {
+        key = afterDash.slice(0, vc).trim();
+        value = afterDash.slice(vc + 1).trim();
+      } else {
+        key = afterDash;
+        value = '';
+      }
+    } else {
+      key = trimmed.slice(0, colonIdx).trim();
+      value = trimmed.slice(colonIdx + 1).trim();
+    }
 
     while (stack.length > 1 && stack[stack.length - 1].indent >= indent) {
       stack.pop();
@@ -46,31 +85,31 @@ function parseYamlLines(lines: string[]): Record<string, unknown> {
     const parent = stack[stack.length - 1].obj;
 
     if (isListItem) {
-      if (!parent[key.trim()]) parent[key.trim()] = [];
-      const arr = parent[key.trim()] as unknown[];
+      if (!parent[key]) parent[key] = [];
+      const arr = parent[key] as unknown[];
       const item: Record<string, unknown> = {};
       arr.push(item);
       stack.push({ indent, obj: item });
 
-      if (value.trim()) {
-        const num = Number(value.trim());
-        item[key.trim()] = value.trim() === 'true' ? true : value.trim() === 'false' ? false : isNaN(num) ? value.trim().replace(/^["']|["']$/g, '') : num;
+      if (value) {
+        const num = Number(value);
+        item[key] = value === 'true' ? true : value === 'false' ? false : isNaN(num) ? value.replace(/^["']|["']$/g, '') : num;
       }
     } else {
-      if (value.trim() === '' || value.trim() === '|' || value.trim() === '>-') {
-        parent[key.trim()] = {};
-        stack.push({ indent, obj: parent[key.trim()] as Record<string, unknown> });
-      } else if (value.trim().startsWith('[') && value.trim().endsWith(']')) {
-        parent[key.trim()] = value.trim().slice(1, -1).split(',').map(v => v.trim().replace(/^["']|["']$/g, ''));
-      } else if (value.trim().startsWith('{') && value.trim().endsWith('}')) {
+      if (value === '' || value === '|' || value === '>-') {
+        parent[key] = {};
+        stack.push({ indent, obj: parent[key] as Record<string, unknown> });
+      } else if (value.startsWith('[') && value.endsWith(']')) {
+        parent[key] = value.slice(1, -1).split(',').map(v => v.trim().replace(/^["']|["']$/g, ''));
+      } else if (value.startsWith('{') && value.endsWith('}')) {
         try {
-          parent[key.trim()] = JSON.parse(value.trim());
+          parent[key] = JSON.parse(value);
         } catch {
-          parent[key.trim()] = value.trim().replace(/^["']|["']$/g, '');
+          parent[key] = value.replace(/^["']|["']$/g, '');
         }
       } else {
-        const num = Number(value.trim());
-        parent[key.trim()] = value.trim() === 'true' ? true : value.trim() === 'false' ? false : isNaN(num) ? value.trim().replace(/^["']|["']$/g, '') : num;
+        const num = Number(value);
+        parent[key] = value === 'true' ? true : value === 'false' ? false : isNaN(num) ? value.replace(/^["']|["']$/g, '') : num;
       }
     }
   }
@@ -136,6 +175,19 @@ function checkContainer(container: Record<string, unknown>, doc: K8sDoc, results
     });
   }
 
+  const caps = securityContext.capabilities as Record<string, unknown>;
+  if (caps?.drop === undefined || !Array.isArray(caps.drop) || caps.drop.length === 0 || !caps.drop.includes('ALL')) {
+    results.push({
+      ruleId: 'k8s-capabilities-drop-missing',
+      type: 'kubernetes',
+      severity: 'high',
+      title: 'Container does not drop ALL capabilities',
+      resource: `${doc.kind}: ${doc.metadata?.name || 'unknown'}`,
+      namespace: doc.metadata?.namespace,
+      advice: ["Add securityContext.capabilities.drop = [\"ALL\"]", "Containers should drop all capabilities and add only what is needed"],
+    });
+  }
+
   if (!securityContext.runAsNonRoot && !podSec.runAsNonRoot) {
     results.push({
       ruleId: 'k8s-run-as-non-root',
@@ -160,10 +212,10 @@ function checkContainer(container: Record<string, unknown>, doc: K8sDoc, results
     });
   }
 
-  const caps = securityContext.capabilities as Record<string, unknown>;
-  if (caps?.add) {
+  const capsDangerous = securityContext.capabilities as Record<string, unknown>;
+  if (capsDangerous?.add) {
     const dangerous = ['SYS_ADMIN', 'NET_ADMIN', 'SYS_MODULE', 'DAC_READ_SEARCH', 'DAC_OVERRIDE', 'FOWNER', 'FSETID', 'KILL', 'SETGID', 'SETUID', 'SETFCAP', 'LINUX_IMMUTABLE', 'NET_BROADCAST', 'IPC_LOCK', 'IPC_OWNER', 'SYS_MODULE', 'SYS_RAWIO', 'SYS_PTRACE', 'SYS_TIME', 'SYS_CHROOT', 'AUDIT_WRITE', 'CHOWN', 'NET_RAW', 'NET_BIND_SERVICE', 'SYS_BOOT'];
-    const added = caps.add as string[];
+    const added = capsDangerous.add as string[];
     for (const cap of added) {
       if (dangerous.includes(cap.toUpperCase())) {
         results.push({
@@ -287,6 +339,99 @@ function checkPodSpec(doc: K8sDoc, results: K8sFinding[]) {
         });
       }
     }
+  }
+
+  const dnsPolicy = spec.dnsPolicy as string;
+  if (dnsPolicy === 'ClusterFirstWithHostNet' && spec.hostNetwork === true) {
+    results.push({
+      ruleId: 'k8s-dns-host-network',
+      type: 'kubernetes',
+      severity: 'medium',
+      title: 'Pod uses host network with ClusterFirst DNS — DNS may resolve incorrectly',
+      resource: `Pod: ${doc.metadata?.name || 'unknown'}`,
+      namespace: doc.metadata?.namespace,
+      advice: ['Set dnsPolicy: ClusterFirst to use cluster DNS from hostNetwork pod', 'Or ensure hostNetwork DNS meets your requirements'],
+    });
+  }
+
+  const hostDevices = spec.hostDevices as Record<string, unknown>;
+  if (hostDevices && Object.keys(hostDevices).length > 0) {
+    results.push({
+      ruleId: 'k8s-host-devices',
+      type: 'kubernetes',
+      severity: 'critical',
+      title: 'Pod has direct access to host devices',
+      resource: `Pod: ${doc.metadata?.name || 'unknown'}`,
+      namespace: doc.metadata?.namespace,
+      advice: ['Avoid hostDevices unless necessary for hardware access'],
+    });
+  }
+
+  if (spec.automountServiceAccountToken === true) {
+    results.push({
+      ruleId: 'k8s-automount-sa-token',
+      type: 'kubernetes',
+      severity: 'medium',
+      title: 'ServiceAccount token explicitly automounted',
+      resource: `Pod: ${doc.metadata?.name || 'unknown'}`,
+      namespace: doc.metadata?.namespace,
+      advice: ['Set automountServiceAccountToken: false if token is not needed', 'Use workload identity instead'],
+    });
+  }
+
+  const serviceAccountName = spec.serviceAccountName as string;
+  if (serviceAccountName === 'default') {
+    results.push({
+      ruleId: 'k8s-default-sa',
+      type: 'kubernetes',
+      severity: 'medium',
+      title: 'Pod uses default service account — lacks proper isolation',
+      resource: `Pod: ${doc.metadata?.name || 'unknown'}`,
+      namespace: doc.metadata?.namespace,
+      advice: ['Create a dedicated service account for this workload', 'Use RBAC to grant minimum required permissions'],
+    });
+  }
+
+  const priorityClassName = spec.priorityClassName as string;
+  if (priorityClassName && !priorityClassName.startsWith('system-')) {
+    const highPriority = ['high', 'critical', 'very-high', 'urgent', 'production-high'];
+    if (highPriority.some(p => priorityClassName.toLowerCase().includes(p))) {
+      results.push({
+        ruleId: 'k8s-high-priority-class',
+        type: 'kubernetes',
+        severity: 'medium',
+        title: `Pod uses high priority class: ${priorityClassName} — may evict other pods`,
+        resource: `Pod: ${doc.metadata?.name || 'unknown'}`,
+        namespace: doc.metadata?.namespace,
+        advice: ['Review if high priority is necessary', 'High priority pods can preempt lower priority workloads'],
+      });
+    }
+  }
+
+  const terminationGracePeriodSeconds = spec.terminationGracePeriodSeconds as number;
+  if (terminationGracePeriodSeconds && terminationGracePeriodSeconds > 300) {
+    results.push({
+      ruleId: 'k8s-long-grace-period',
+      type: 'kubernetes',
+      severity: 'low',
+      title: `Termination grace period is ${terminationGracePeriodSeconds}s — longer than recommended`,
+      resource: `Pod: ${doc.metadata?.name || 'unknown'}`,
+      namespace: doc.metadata?.namespace,
+      advice: ['Consider reducing terminationGracePeriodSeconds to 300 or less', 'Long grace periods delay pod cleanup and scaling operations'],
+    });
+  }
+
+  const defaultAllowPrivilegeEscalation = secCtx.defaultAllowPrivilegeEscalation;
+  if (defaultAllowPrivilegeEscalation === true) {
+    results.push({
+      ruleId: 'k8s-default-allow-priv-esc',
+      type: 'kubernetes',
+      severity: 'critical',
+      title: 'PodSecurityContext defaultAllowPrivilegeEscalation is true',
+      resource: `Pod: ${doc.metadata?.name || 'unknown'}`,
+      namespace: doc.metadata?.namespace,
+      advice: ['Set defaultAllowPrivilegeEscalation: false in PodSecurityContext', 'This is a PSP-adjacent control for environments without PSP'],
+    });
   }
 }
 

@@ -229,6 +229,127 @@ spec:
     const findings = scanK8sManifest(yaml);
     expect(findings.some(f => f.ruleId === 'k8s-default-allow-priv-esc')).toBe(true);
   });
+
+  it('scan container missing liveness probe → finds k8s-missing-liveness-probe', () => {
+    const yaml = `
+apiVersion: v1
+kind: Pod
+metadata:
+  name: no-liveness
+spec:
+  containers:
+    - name: app
+      image: app:latest
+`;
+    const findings = scanK8sManifest(yaml);
+    expect(findings.some(f => f.ruleId === 'k8s-missing-liveness-probe')).toBe(true);
+  });
+
+  it('scan container with liveness probe → does not find k8s-missing-liveness-probe', () => {
+    const yaml = `
+apiVersion: v1
+kind: Pod
+metadata:
+  name: with-liveness
+spec:
+  containers:
+    - name: app
+      image: app:latest
+      livenessProbe:
+        httpGet:
+          path: /healthz
+          port: 8080
+`;
+    const findings = scanK8sManifest(yaml);
+    expect(findings.some(f => f.ruleId === 'k8s-missing-liveness-probe')).toBe(false);
+  });
+
+  it('scan container missing readiness probe → finds k8s-missing-readiness-probe', () => {
+    const yaml = `
+apiVersion: v1
+kind: Pod
+metadata:
+  name: no-readiness
+spec:
+  containers:
+    - name: app
+      image: app:latest
+`;
+    const findings = scanK8sManifest(yaml);
+    expect(findings.some(f => f.ruleId === 'k8s-missing-readiness-probe')).toBe(true);
+  });
+
+  it('scan container with readiness probe → does not find k8s-missing-readiness-probe', () => {
+    const yaml = `
+apiVersion: v1
+kind: Pod
+metadata:
+  name: with-readiness
+spec:
+  containers:
+    - name: app
+      image: app:latest
+      readinessProbe:
+        httpGet:
+          path: /ready
+          port: 8080
+`;
+    const findings = scanK8sManifest(yaml);
+    expect(findings.some(f => f.ruleId === 'k8s-missing-readiness-probe')).toBe(false);
+  });
+
+  it('scan container missing resources → finds k8s-missing-resources', () => {
+    const yaml = `
+apiVersion: v1
+kind: Pod
+metadata:
+  name: no-resources
+spec:
+  containers:
+    - name: app
+      image: app:latest
+`;
+    const findings = scanK8sManifest(yaml);
+    expect(findings.some(f => f.ruleId === 'k8s-missing-resources')).toBe(true);
+  });
+
+  it('scan container with resources → does not find k8s-missing-resources', () => {
+    const yaml = `
+apiVersion: v1
+kind: Pod
+metadata:
+  name: with-resources
+spec:
+  containers:
+    - name: app
+      image: app:latest
+      resources:
+        limits:
+          cpu: "100m"
+          memory: "128Mi"
+        requests:
+          cpu: "50m"
+          memory: "64Mi"
+`;
+    const findings = scanK8sManifest(yaml);
+    expect(findings.some(f => f.ruleId === 'k8s-missing-resources')).toBe(false);
+  });
+
+  it('scan automountServiceAccountToken: false → finds k8s-automount-sa-token-false', () => {
+    const yaml = `
+apiVersion: v1
+kind: Pod
+metadata:
+  name: no-sa-token
+spec:
+  automountServiceAccountToken: false
+  containers:
+    - name: app
+      image: app:latest
+`;
+    const findings = scanK8sManifest(yaml);
+    expect(findings.some(f => f.ruleId === 'k8s-automount-sa-token-false')).toBe(true);
+  });
 });
 
 describe('formatK8sOutput', () => {

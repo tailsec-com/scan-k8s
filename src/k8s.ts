@@ -2,10 +2,26 @@ import { readFileSync, statSync } from 'fs';
 
 const YAML_CACHE = new Map<string, unknown[]>();
 const RELEVANT_KINDS = new Set(['Pod', 'Deployment', 'StatefulSet', 'DaemonSet', 'Job', 'CronJob', 'Role', 'ClusterRole', 'NetworkPolicy', 'Service']);
+const RELEVANT_KINDS_RE = /\b(Pod|Deployment|StatefulSet|DaemonSet|Job|CronJob|Role|ClusterRole|NetworkPolicy|Service)\b/;
+const MAX_FILE_SIZE = 10 * 1024 * 1024;
+
+export function isBinaryFile(content: Buffer): boolean {
+  if (content.length === 0) return true;
+  if (content.length < 4) return false;
+  const checkLen = Math.min(content.length, 8192);
+  for (let i = 0; i < checkLen; i++) {
+    if (content[i] === 0) return true;
+  }
+  return false;
+}
 
 function parseYaml(content: string): unknown[] {
   const cached = YAML_CACHE.get(content);
   if (cached) return cached;
+
+  if (!RELEVANT_KINDS_RE.test(content)) {
+    return [];
+  }
 
   const docs: unknown[] = [];
   const rawDocs = content.split(/^---$/m);
@@ -286,6 +302,58 @@ function checkContainer(container: Record<string, unknown>, doc: K8sDoc, results
 function checkPodSpec(doc: K8sDoc, results: K8sFinding[]) {
   const spec = doc.spec as Record<string, unknown> || {};
   const secCtx = spec.securityContext as Record<string, unknown> || {};
+
+  const containers = normalizeValue(spec.containers);
+  const initContainers = normalizeValue(spec.initContainers);
+
+  for (const c of [...containers, ...initContainers]) {
+    if (!c.livenessProbe) {
+      results.push({
+        ruleId: 'k8s-missing-liveness-probe',
+        type: 'kubernetes',
+        severity: 'medium',
+        title: 'Container missing liveness probe',
+        resource: `${doc.kind}: ${doc.metadata?.name || 'unknown'}`,
+        namespace: doc.metadata?.namespace,
+        advice: ['Add livenessProbe to detect and restart unhealthy containers'],
+      });
+    }
+    if (!c.readinessProbe) {
+      results.push({
+        ruleId: 'k8s-missing-readiness-probe',
+        type: 'kubernetes',
+        severity: 'medium',
+        title: 'Container missing readiness probe',
+        resource: `${doc.kind}: ${doc.metadata?.name || 'unknown'}`,
+        namespace: doc.metadata?.namespace,
+        advice: ['Add readinessProbe to ensure traffic is only routed to ready containers'],
+      });
+    }
+    const resources = c.resources as Record<string, unknown>;
+    if (!resources || !resources.limits || !resources.requests) {
+      results.push({
+        ruleId: 'k8s-missing-resources',
+        type: 'kubernetes',
+        severity: 'medium',
+        title: 'Container missing resource requests or limits',
+        resource: `${doc.kind}: ${doc.metadata?.name || 'unknown'}`,
+        namespace: doc.metadata?.namespace,
+        advice: ['Set resources.requests and resources.limits for CPU and memory'],
+      });
+    }
+  }
+
+  if (spec.automountServiceAccountToken === false) {
+    results.push({
+      ruleId: 'k8s-automount-sa-token-false',
+      type: 'kubernetes',
+      severity: 'info',
+      title: 'ServiceAccount token explicitly disabled',
+      resource: `Pod: ${doc.metadata?.name || 'unknown'}`,
+      namespace: doc.metadata?.namespace,
+      advice: ['Verify this is intentional — token is required for service account authentication'],
+    });
+  }
 
   if (spec.hostNetwork === true) {
     results.push({

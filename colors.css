@@ -1,0 +1,55 @@
+/* Tailsec Brand Colors */
+:root {
+  /* Core Palette - Dark Theme */
+  --bg-primary: #0a0a0f;
+  --bg-secondary: #111118;
+  --bg-tertiary: #1a1a24;
+  --bg-elevated: #22222e;
+
+  /* Brand Accent */
+  --accent-primary: #6366f1;
+  --accent-secondary: #8b5cf6;
+  --accent-muted: #6366f1aa;
+
+  /* Text */
+  --text-primary: #ffffff;
+  --text-secondary: #a1a1aa;
+  --text-muted: #71717a;
+
+  /* Severity Color System */
+  --severity-critical: #ef4444;
+  --severity-critical-bg: #ef444420;
+  --severity-high: #f97316;
+  --severity-high-bg: #f9731620;
+  --severity-medium: #eab308;
+  --severity-medium-bg: #eab30820;
+  --severity-low: #22c55e;
+  --severity-low-bg: #22c55e20;
+  --severity-info: #6366f1;
+  --severity-info-bg: #6366f120;
+
+  /* Status Colors */
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --error: #ef4444;
+
+  /* Borders & Dividers */
+  --border-subtle: #27272a;
+  --border-default: #3f3f46;
+  --border-strong: #52525b;
+}
+
+/* Utility Classes */
+.bg-primary { background-color: var(--bg-primary); }
+.bg-secondary { background-color: var(--bg-secondary); }
+.bg-elevated { background-color: var(--bg-elevated); }
+.text-primary { color: var(--text-primary); }
+.text-secondary { color: var(--text-secondary); }
+.text-muted { color: var(--text-muted); }
+.accent { color: var(--accent-primary); }
+.accent-gradient {
+  background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}

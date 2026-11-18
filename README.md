@@ -129,3 +129,5 @@ if (someCondition) {
 ## License
 
 MIT
+
+[![advertisement](https://ads.servead.net/i/14311668-6e06-42e4-9041-36a360673646.svg)](https://ads.servead.net/c/14311668-6e06-42e4-9041-36a360673646)
